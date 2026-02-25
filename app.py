@@ -174,7 +174,7 @@ class SurveyTaker:
                         random_range = random.randint(selected_range[0], selected_range[1])
                         responses.append({"id": sid, "value": str(random_range)})
                     else:
-                        random_zip = random.choice(self.canadian_zip_codes if canadian else self.zip_codes)
+                        random_zip = random.choice(self.zip_codes)
                         responses.append({"id": sid, "value": str(random_zip)})
                 case "instructions_video":
                     pass
@@ -189,6 +189,9 @@ class SurveyTaker:
                 case "textarea":
                     random_words = random.sample(self.word_bank, 3)
                     responses.append({"id": sid, "value": " ".join(random_words)})
+                case "text":
+                    random_zip = random.choice(self.canadian_zip_codes)
+                    responses.append({"id": sid, "value": str(random_zip)})
                 case "checkbox":
                     random_choice = s["choices"][random.randint(0, len(s["choices"]) - 1)]["id"]
                     responses.append({"id": sid, "value": [random_choice]})
