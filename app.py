@@ -1,4 +1,5 @@
 import random
+import time
 import uuid
 from uuid import uuid4
 import concurrent.futures
@@ -18,7 +19,13 @@ app = Flask(__name__)
 
 # ace_live_demo_uuids = [gender, age, income, ethnicity, kids, zip]
 ace_live_demo_uuids = ["be3e7c45-1089-410a-96c0-c90aa06702af", "2fa7e679-3923-4305-b35d-5f31d85992b9", "5b537309-eaab-4544-8fce-899f2130bd7d", "601dae29-e6d8-4479-93e2-ad22b97dcae0", "82538095-4009-4196-befb-f9c34403127e", "e12f3ab7-b61e-4d63-8a2f-4475c9ce92db"]
-ethnicity_probs = [.5, .15, .15, .1, .1]
+demo_values = {"1d7487f0-2f41-47f6-9e53-4e2c75f146ba": "male", "de3dae0b-53f2-48e8-aac8-0b57ffa1e1e1": "female", "bfdc0d43-d88b-43a7-b735-9329eb88dae0": "under40k", "519151f9-8eee-4e3b-9f15-b44597acb30d": "40k-75k", "47f8c6fb-8dbf-4c7d-8ef6-cef2406d9e17": "over75k", "234121f9-6eee-4e1b-9f41-b44121acb35d": "over75k", "00c29f48-37d1-4b7e-bfb3-7bdf280aea1a": "caucasian", "f0b37ce0-c9c6-4f1e-ae9f-ef30b8f5e05a": "hispanic", "a143d47e-4e42-4e48-b757-9a5fd323a724": "african", "36f1f374-c302-4965-bbf9-068334a72595": "asian", "889e9119-5501-43f9-a27f-49c7cee914d9": "other"}
+income_probs = [.33, .33, .17, .17]
+ethnicity_probs = [.62, .11, .2, .04, .03]
+# ethnicity_probs = [caucasian, hispanic, african, asian, other]
+# ethnicity_probs_even = [.2, .2, .2, .2, .2]
+# ethnicity_probs_current = [.62, .11, .2, .04, .03]
+# ethnicity_probs_desired = [.5, .15, .15, .07, .03]
 
 
 class SurveyTaker:
@@ -32,6 +39,10 @@ class SurveyTaker:
             self.word_bank = [word.strip() for word in f.readlines()]
         with open('zipcodes.txt', 'r') as f:
             self.zip_codes = [zip_code.strip() for zip_code in f.readlines()]
+        with open('canadian_zipcodes.txt', 'r') as f:
+            self.canadian_zip_codes = [zip_code.strip() for zip_code in f.readlines()]
+        with open('codes.json', 'r') as f:
+            self.codes = json.load(f)
 
     def create_participant(self, survey_token: str, provider_code: str, participant_key: str, secret_key: str) -> str:
         ua = 'Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36'
@@ -78,12 +89,15 @@ class SurveyTaker:
         return flight_data["token"], provider_data["code"], provider_data["participantKeyParam"], provider_data["secretKey"]
 
     def update_flight_surveytaker(self, survey_uuid: str, survey_taker: str):
-        response = requests.put(
-            f"{Config.SURVEY_API_BASE_URL}/api/flights/{survey_uuid}/?status=open&surveytaker={survey_taker}",
-            proxies=self.proxies
-       )
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = requests.put(
+                f"{Config.SURVEY_API_BASE_URL}/api/flights/{survey_uuid}/?status=open&surveytaker={survey_taker}",
+                proxies=self.proxies
+                )
+            response.raise_for_status()
+            return response.json()
+        except:
+            print('survey taker already updated')
 
 
     def format_response(self, participation_id: str, step_id: int, responses: list) -> Dict[str, Any]:
@@ -124,7 +138,7 @@ class SurveyTaker:
             }]
         return scores
 
-    def get_substep_responses(self, substeps: list, question_ids: list, demo_answers: Dict[str, Any]) -> list:
+    def get_substep_responses(self, substeps: list, question_ids: list, demo_answers: Dict[str, Any], canadian: bool) -> list:
         responses = []
         for s in substeps:
             sid = s.get("id")
@@ -140,6 +154,8 @@ class SurveyTaker:
                         continue
                     if sid == "601dae29-e6d8-4479-93e2-ad22b97dcae0":
                         random_choice = random.choices(s["choices"], weights=ethnicity_probs)[0]
+                    elif sid == "5b537309-eaab-4544-8fce-899f2130bd7d":
+                        random_choice = random.choices(s["choices"], weights=income_probs)[0]
                     else:
                         random_choice = s["choices"][random.randint(0, len(s["choices"]) - 1)]
                     radio_response = {"id": sid, "value": random_choice["id"]}
@@ -152,13 +168,13 @@ class SurveyTaker:
                         if sid in demo_answers:
                             responses.append({"id": sid, "value": str(2025 - int(demo_answers[sid]))})
                             continue
-                        age_groups = [(1945, 1975), (1976, 1989), (1990, 2004), (2005, 2007)]
+                        age_groups = [(1946, 1976), (1977, 1990), (1991, 2005), (2006, 2008)]
                         age_weights = [0.31, 0.31, 0.31, 0.07]
                         selected_range = random.choices(age_groups, weights=age_weights)[0]
                         random_range = random.randint(selected_range[0], selected_range[1])
                         responses.append({"id": sid, "value": str(random_range)})
                     else:
-                        random_zip = random.choice(self.zip_codes)
+                        random_zip = random.choice(self.canadian_zip_codes if canadian else self.zip_codes)
                         responses.append({"id": sid, "value": str(random_zip)})
                 case "instructions_video":
                     pass
@@ -178,27 +194,50 @@ class SurveyTaker:
                     responses.append({"id": sid, "value": [random_choice]})
         return responses
     
-    def take_survey(self, survey_token: str, provider_code: str, participant_key: str, secret_key: str, demo_answers: Dict[str, Any]) -> bool:
-        survey_fin = False
-        survey_complete = False
-        current_ppt = self.create_participant(survey_token, provider_code, participant_key, secret_key)
-        ppt_id = current_ppt.get("participationId")
+    def take_survey(self, survey_token: str, flight_uuid: str, provider_code: str, participant_key: str, secret_key: str, demo_answers: Dict[str, Any], canadian: bool) -> bool:
+        try:
+            survey_fin = False
+            survey_complete = False
+            current_ppt = self.create_participant(survey_token, provider_code, participant_key, secret_key)
+            ppt_id = current_ppt.get("participationId")
+            ppt_demo = {}
+            rejection_reason = None
 
-        while not survey_fin:
-            step_id = current_ppt.get("stepId")
-            if step_id == -1:
-                print(f"REJECTED: {current_ppt}")
-                survey_fin = True
-                if current_ppt.get("substeps")[0]["errorCode"] in [301,302]:
-                    survey_complete = True
-                continue
-            if current_ppt.get("meta").get("finished"):
-                survey_fin = True
-                continue
-            responses = self.get_substep_responses(current_ppt.get("substeps"), current_ppt.get("meta").get("questionIds"), demo_answers)
-            current_ppt = self.progress_participant(ppt_id, self.format_response(ppt_id, step_id, responses))
-        
-        return survey_complete
+            while not survey_fin:
+                step_id = current_ppt.get("stepId")
+                if step_id == -1:
+                    print(f"REJECTED: {current_ppt}")
+                    rejection_reason = self.codes[str(current_ppt.get("substeps")[0]["errorCode"])]
+                    survey_fin = True
+                    if current_ppt.get("substeps")[0]["errorCode"] in [301,302]:
+                        survey_complete = True
+                    continue
+                if current_ppt.get("meta").get("finished"):
+                    survey_fin = True
+                    continue
+                responses = self.get_substep_responses(current_ppt.get("substeps"), current_ppt.get("meta").get("questionIds"), demo_answers, canadian)
+                for r in responses:
+                    if r.get("id") in ace_live_demo_uuids:
+                        ppt_demo['timestamp'] = time.time()
+                        if r.get("id") == "2fa7e679-3923-4305-b35d-5f31d85992b9":
+                            ppt_demo['age'] = 2026 - int(r.get("value"))
+                        if r.get("id") == "be3e7c45-1089-410a-96c0-c90aa06702af":
+                            ppt_demo['gender'] = demo_values[r.get("value")]
+                        if r.get("id") == "5b537309-eaab-4544-8fce-899f2130bd7d":
+                            ppt_demo['income'] = demo_values[r.get("value")]
+                        if r.get("id") == "601dae29-e6d8-4479-93e2-ad22b97dcae0":
+                            ppt_demo['ethnicity'] = demo_values[r.get("value")]
+                current_ppt = self.progress_participant(ppt_id, self.format_response(ppt_id, step_id, responses))
+
+            if 'ethnicity' in ppt_demo:
+                with open(f'/Users/jordanculver/Desktop/weighted_survey_ppts/{flight_uuid}', 'a') as f:
+                    f.write(f"{ppt_id},{ppt_demo['gender']},{ppt_demo['age']},{ppt_demo['income']},{ppt_demo['ethnicity']},{rejection_reason},{ppt_demo['timestamp']}" + '\n')
+
+            return survey_complete
+
+        except Exception as e:
+            print(f"ERROR: {str(e)}")
+            return False
 
     def get_replay_data(self, replay_uuid: str) -> list:
         try:
@@ -242,30 +281,39 @@ survey_taker = SurveyTaker()
 
 @app.route('/survey/take', methods=['POST'])
 def take_survey():
+    survey_uuids = []
     survey_uuid = request.json.get('survey_uuid')
-    
+    canadian = request.json.get('canadian')
+
     if not survey_uuid:
         return jsonify({"error": "survey_uuid parameter required"}), 400
 
-    survey_token, provider_code, participant_key, secret_key = survey_taker.get_flight_data(survey_uuid)
-    
-    try:
-        survey_taker.update_flight_surveytaker(survey_uuid, "true")
-        
-        total_completed = 0
-        while True:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(survey_taker.take_survey, survey_token, provider_code, participant_key, secret_key, {}) for _ in range(10)]
-                results = [future.result() for future in concurrent.futures.as_completed(futures)]
-            
-            total_completed += len(results)
-            if any(results):
-                break
-        
-        survey_taker.update_flight_surveytaker(survey_uuid, "false")
-        return jsonify({"completed": total_completed, "successful": sum(results)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if type(survey_uuid) == str:
+        survey_uuids = [survey_uuid]
+    elif type(survey_uuid) == list:
+        survey_uuids = survey_uuid
+
+    for survey_uuid in survey_uuids:
+        print(f"Taking survey {survey_uuid}")
+        survey_token, provider_code, participant_key, secret_key = survey_taker.get_flight_data(survey_uuid)
+
+        try:
+            survey_taker.update_flight_surveytaker(survey_uuid, "true")
+
+            total_completed = 0
+            while True:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = [executor.submit(survey_taker.take_survey, survey_token, survey_uuid, provider_code, participant_key, secret_key, {}, canadian) for _ in range(20)]
+                    results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+                total_completed += len(results)
+                if any(results):
+                    break
+
+            survey_taker.update_flight_surveytaker(survey_uuid, "false")
+        except Exception as e:
+            print(f"ERROR with {survey_uuid}")
+            return jsonify({"error": str(e)}), 500
 
 @app.route('/survey/replay', methods=['POST'])
 def replay_survey():
@@ -302,13 +350,13 @@ def replay_survey():
                                 demo_answers[r.get('questionUuid')] = r.get('text')
                                 continue
                             demo_answers[r.get('questionUuid')] = r.get('choices')[0]['uuid']
-                    survey_complete = survey_taker.take_survey(survey_token, provider_code, participant_key, secret_key, demo_answers)
+                    survey_complete = survey_taker.take_survey(survey_token, survey_uuid, provider_code, participant_key, secret_key, demo_answers)
                     if survey_complete:
                         break
             else:
                 demo_answers = survey_taker.get_demo_answers()
                 for d in demo_answers:
-                    survey_complete = survey_taker.take_survey(survey_token, provider_code, participant_key, secret_key, d)
+                    survey_complete = survey_taker.take_survey(survey_token, survey_uuid, provider_code, participant_key, secret_key, d)
                     if survey_complete:
                         break
             return survey_complete
