@@ -21,7 +21,7 @@ app = Flask(__name__)
 ace_live_demo_uuids = ["be3e7c45-1089-410a-96c0-c90aa06702af", "2fa7e679-3923-4305-b35d-5f31d85992b9", "5b537309-eaab-4544-8fce-899f2130bd7d", "601dae29-e6d8-4479-93e2-ad22b97dcae0", "82538095-4009-4196-befb-f9c34403127e", "e12f3ab7-b61e-4d63-8a2f-4475c9ce92db"]
 demo_values = {"1d7487f0-2f41-47f6-9e53-4e2c75f146ba": "male", "de3dae0b-53f2-48e8-aac8-0b57ffa1e1e1": "female", "bfdc0d43-d88b-43a7-b735-9329eb88dae0": "under40k", "519151f9-8eee-4e3b-9f15-b44597acb30d": "40k-75k", "47f8c6fb-8dbf-4c7d-8ef6-cef2406d9e17": "over75k", "234121f9-6eee-4e1b-9f41-b44121acb35d": "over75k", "00c29f48-37d1-4b7e-bfb3-7bdf280aea1a": "caucasian", "f0b37ce0-c9c6-4f1e-ae9f-ef30b8f5e05a": "hispanic", "a143d47e-4e42-4e48-b757-9a5fd323a724": "african", "36f1f374-c302-4965-bbf9-068334a72595": "asian", "889e9119-5501-43f9-a27f-49c7cee914d9": "other"}
 income_probs = [.33, .33, .17, .17]
-ethnicity_probs = [.62, .11, .2, .04, .03]
+ethnicity_probs = [.5, .15, .15, .07, .03]
 # ethnicity_probs = [caucasian, hispanic, african, asian, other]
 # ethnicity_probs_even = [.2, .2, .2, .2, .2]
 # ethnicity_probs_current = [.62, .11, .2, .04, .03]
@@ -138,7 +138,7 @@ class SurveyTaker:
             }]
         return scores
 
-    def get_substep_responses(self, substeps: list, question_ids: list, demo_answers: Dict[str, Any], canadian: bool) -> list:
+    def get_substep_responses(self, substeps: list, question_ids: list, demo_answers: Dict[str, Any], canadian: bool, high_income: bool) -> list:
         responses = []
         for s in substeps:
             sid = s.get("id")
@@ -148,16 +148,20 @@ class SurveyTaker:
                 continue
 
             match stype:
-                case "radio":
+                case "radio" | "select":
                     if sid in demo_answers:
                         responses.append({"id": sid, "value": demo_answers[sid]})
                         continue
                     if sid == "601dae29-e6d8-4479-93e2-ad22b97dcae0":
                         random_choice = random.choices(s["choices"], weights=ethnicity_probs)[0]
                     elif sid == "5b537309-eaab-4544-8fce-899f2130bd7d":
-                        random_choice = random.choices(s["choices"], weights=income_probs)[0]
+                        if high_income:
+                            random_choice = {"id": "234121f9-6eee-4e1b-9f41-b44121acb35d"}
+                        else:
+                            random_choice = random.choices(s["choices"], weights=income_probs)[0]
                     else:
                         random_choice = s["choices"][random.randint(0, len(s["choices"]) - 1)]
+
                     radio_response = {"id": sid, "value": random_choice["id"]}
                     if "flag" in random_choice and random_choice["flag"] == "BRAND":
                         radio_response["inputText"] = random.sample(self.word_bank, 1)[0]
@@ -187,7 +191,7 @@ class SurveyTaker:
                     random_range = random.randint(1, 99)
                     responses.append({"id": sid, "value": random_range})
                 case "textarea":
-                    random_words = random.sample(self.word_bank, 3)
+                    random_words = random.sample(self.word_bank, 1)
                     responses.append({"id": sid, "value": " ".join(random_words)})
                 case "text":
                     random_zip = random.choice(self.canadian_zip_codes)
@@ -197,7 +201,7 @@ class SurveyTaker:
                     responses.append({"id": sid, "value": [random_choice]})
         return responses
     
-    def take_survey(self, survey_token: str, flight_uuid: str, provider_code: str, participant_key: str, secret_key: str, demo_answers: Dict[str, Any], canadian: bool) -> bool:
+    def take_survey(self, survey_token: str, flight_uuid: str, provider_code: str, participant_key: str, secret_key: str, demo_answers: Dict[str, Any], canadian: bool, high_income: bool) -> bool:
         try:
             survey_fin = False
             survey_complete = False
@@ -218,7 +222,7 @@ class SurveyTaker:
                 if current_ppt.get("meta").get("finished"):
                     survey_fin = True
                     continue
-                responses = self.get_substep_responses(current_ppt.get("substeps"), current_ppt.get("meta").get("questionIds"), demo_answers, canadian)
+                responses = self.get_substep_responses(current_ppt.get("substeps"), current_ppt.get("meta").get("questionIds"), demo_answers, canadian, high_income)
                 for r in responses:
                     if r.get("id") in ace_live_demo_uuids:
                         ppt_demo['timestamp'] = time.time()
@@ -287,6 +291,7 @@ def take_survey():
     survey_uuids = []
     survey_uuid = request.json.get('survey_uuid')
     canadian = request.json.get('canadian')
+    high_income = request.json.get('high_income')
 
     if not survey_uuid:
         return jsonify({"error": "survey_uuid parameter required"}), 400
@@ -306,7 +311,7 @@ def take_survey():
             total_completed = 0
             while True:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                    futures = [executor.submit(survey_taker.take_survey, survey_token, survey_uuid, provider_code, participant_key, secret_key, {}, canadian) for _ in range(20)]
+                    futures = [executor.submit(survey_taker.take_survey, survey_token, survey_uuid, provider_code, participant_key, secret_key, {}, canadian, high_income) for _ in range(20)]
                     results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
                 total_completed += len(results)
